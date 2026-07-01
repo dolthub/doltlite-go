@@ -6,8 +6,7 @@ databases over doltlite's HTTP sync protocol.
 doltlite is a SQLite fork whose storage engine is a content-addressed prolly-tree
 chunk store. It syncs (clone/fetch/push) over a small HTTP protocol implemented in C
 (`doltlite-remotesrv` / `doltlite_http_remote.c`). This module reimplements the pieces
-of that protocol needed in Go — most immediately so DoltHub's `doltremoteapi` service
-can host doltlite databases. See [PLAN.md](./PLAN.md) for the staged rollout.
+of that protocol needed in Go.
 
 ## Packages
 
