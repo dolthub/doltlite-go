@@ -52,7 +52,7 @@ func TestMemStoreGetReturnsCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := m.Get(ctx, c.Hash)
-	got[0] ^= 0xff // mutate the returned slice
+	got[0] ^= 0xff
 	again, _ := m.Get(ctx, c.Hash)
 	if !bytes.Equal(again, c.Data) {
 		t.Fatal("Get must return a copy; store was mutated by caller")
@@ -67,7 +67,6 @@ func TestMemStoreRefsCAS(t *testing.T) {
 		t.Fatalf("GetRefs on empty = %v, want ErrNotFound", err)
 	}
 
-	// First push: expected is the zero hash because there are no refs yet.
 	first := []byte("refs-v1")
 	if err := m.SetRefsIf(ctx, prollyhash.Hash{}, first); err != nil {
 		t.Fatalf("initial SetRefsIf: %v", err)
@@ -78,12 +77,10 @@ func TestMemStoreRefsCAS(t *testing.T) {
 		t.Fatalf("GetRefs = %q, %v", got, err)
 	}
 
-	// A stale expected hash (still zero) must now conflict.
 	if err := m.SetRefsIf(ctx, prollyhash.Hash{}, []byte("refs-v2-stale")); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale SetRefsIf = %v, want ErrConflict", err)
 	}
 
-	// Using the correct current hash succeeds.
 	cur := prollyhash.Compute(first)
 	second := []byte("refs-v2")
 	if err := m.SetRefsIf(ctx, cur, second); err != nil {

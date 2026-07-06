@@ -32,7 +32,7 @@ func TestDecodeHashesBadLength(t *testing.T) {
 	if _, err := DecodeHashes(make([]byte, prollyhash.Size+1)); err == nil {
 		t.Fatal("expected error for non-multiple length")
 	}
-	// Empty is valid (zero hashes).
+
 	out, err := DecodeHashes(nil)
 	if err != nil || len(out) != 0 {
 		t.Fatalf("empty body: got %v, %v", out, err)
@@ -65,7 +65,7 @@ func TestChunksRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Zero-length chunk records are emitted and decoded, so counts match.
+
 	if len(out) != len(in) {
 		t.Fatalf("got %d chunks, want %d", len(out), len(in))
 	}
@@ -79,7 +79,7 @@ func TestChunksRoundTrip(t *testing.T) {
 func TestDecodeChunksTruncated(t *testing.T) {
 	d := []byte("payload")
 	body := EncodeChunks([]litestore.Chunk{{Hash: prollyhash.Compute(d), Data: d}})
-	// Drop the last byte: the declared length now runs past the body.
+
 	if _, err := DecodeChunks(body[:len(body)-1]); err == nil {
 		t.Fatal("expected error for truncated chunk body")
 	}
@@ -95,7 +95,7 @@ func TestRefsIfRoundTrip(t *testing.T) {
 	if gotExpected != expected || !bytes.Equal(gotBlob, blob) {
 		t.Fatal("refs-if round trip mismatch")
 	}
-	// A body of exactly the hash size (empty blob) is rejected.
+
 	if _, _, err := DecodeRefsIf(make([]byte, prollyhash.Size)); err == nil {
 		t.Fatal("expected error for empty blob")
 	}

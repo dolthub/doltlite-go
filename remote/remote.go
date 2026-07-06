@@ -1,11 +1,3 @@
-// Package remote is a Go client for doltlite's HTTP sync protocol — the
-// analog of doltlite's C DoltliteRemote/doltliteHttpRemoteOpen. It is used for
-// end-to-end testing of a server (package litehttp) and for Go tooling that
-// pushes to or pulls from a doltlite remote.
-//
-// Unlike doltlite's current C client, this client supports https:// and an
-// optional bearer token, so it can exercise an authenticated, TLS-terminated
-// hosted server.
 package remote
 
 import (
@@ -22,35 +14,26 @@ import (
 	"github.com/dolthub/doltlite-go/remoteproto"
 )
 
-// ErrNotFound is returned by GetChunk and GetRefs when the server responds 404.
 var ErrNotFound = errors.New("remote: not found")
 
-// ErrConflict is returned by SetRefsIf when the server responds 409, meaning
-// the refs precondition failed and the caller should re-fetch refs and retry.
 var ErrConflict = errors.New("remote: refs precondition failed")
 
-// Client talks to a single doltlite repository's remote endpoint.
 type Client struct {
 	httpc     *http.Client
-	baseURL   string // no trailing slash; e.g. https://host/owner/repo
+	baseURL   string
 	authToken string
 }
 
-// Option configures a Client.
 type Option func(*Client)
 
-// WithHTTPClient sets the underlying HTTP client.
 func WithHTTPClient(c *http.Client) Option {
 	return func(cl *Client) { cl.httpc = c }
 }
 
-// WithBearerToken sends "Authorization: Bearer <token>" on every request.
 func WithBearerToken(token string) Option {
 	return func(cl *Client) { cl.authToken = token }
 }
 
-// New returns a Client for the repository rooted at baseURL. baseURL should
-// include the repository path (e.g. https://doltremoteapi.dolthub.com/owner/repo).
 func New(baseURL string, opts ...Option) *Client {
 	c := &Client{
 		httpc:   http.DefaultClient,
@@ -89,7 +72,6 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte) (
 	return resp.StatusCode, respBody, nil
 }
 
-// HasChunks reports, for each requested hash, whether the remote has the chunk.
 func (c *Client) HasChunks(ctx context.Context, hashes []prollyhash.Hash) ([]bool, error) {
 	status, body, err := c.do(ctx, http.MethodPost, remoteproto.EndpointHasChunks, remoteproto.EncodeHashes(hashes))
 	if err != nil {
@@ -101,7 +83,6 @@ func (c *Client) HasChunks(ctx context.Context, hashes []prollyhash.Hash) ([]boo
 	return remoteproto.DecodePresence(body, len(hashes))
 }
 
-// GetChunk fetches a single chunk by hash, or returns ErrNotFound.
 func (c *Client) GetChunk(ctx context.Context, h prollyhash.Hash) ([]byte, error) {
 	status, body, err := c.do(ctx, http.MethodGet, remoteproto.EndpointChunk+"/"+h.String(), nil)
 	if err != nil {
@@ -117,8 +98,6 @@ func (c *Client) GetChunk(ctx context.Context, h prollyhash.Hash) ([]byte, error
 	}
 }
 
-// PutChunks uploads chunks to the remote in a single request. The server stores
-// them durably.
 func (c *Client) PutChunks(ctx context.Context, chunks []litestore.Chunk) error {
 	status, _, err := c.do(ctx, http.MethodPost, remoteproto.EndpointChunks, remoteproto.EncodeChunks(chunks))
 	if err != nil {
@@ -130,7 +109,6 @@ func (c *Client) PutChunks(ctx context.Context, chunks []litestore.Chunk) error 
 	return nil
 }
 
-// GetRefs fetches the remote's refs blob, or returns ErrNotFound.
 func (c *Client) GetRefs(ctx context.Context) ([]byte, error) {
 	status, body, err := c.do(ctx, http.MethodGet, remoteproto.EndpointRefs, nil)
 	if err != nil {
@@ -146,7 +124,6 @@ func (c *Client) GetRefs(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// SetRefs unconditionally installs the refs blob on the remote.
 func (c *Client) SetRefs(ctx context.Context, blob []byte) error {
 	status, _, err := c.do(ctx, http.MethodPut, remoteproto.EndpointRefs, blob)
 	if err != nil {
@@ -158,9 +135,6 @@ func (c *Client) SetRefs(ctx context.Context, blob []byte) error {
 	return nil
 }
 
-// SetRefsIf installs the refs blob only if the remote's current refs hash equals
-// expected, else returns ErrConflict. For a repository with no refs yet, pass
-// the zero hash as expected.
 func (c *Client) SetRefsIf(ctx context.Context, expected prollyhash.Hash, blob []byte) error {
 	status, _, err := c.do(ctx, http.MethodPut, remoteproto.EndpointRefsIf, remoteproto.EncodeRefsIf(expected, blob))
 	if err != nil {
@@ -176,7 +150,6 @@ func (c *Client) SetRefsIf(ctx context.Context, expected prollyhash.Hash, blob [
 	}
 }
 
-// Commit issues the protocol's commit barrier.
 func (c *Client) Commit(ctx context.Context) error {
 	status, _, err := c.do(ctx, http.MethodPost, remoteproto.EndpointCommit, nil)
 	if err != nil {
@@ -188,9 +161,6 @@ func (c *Client) Commit(ctx context.Context) error {
 	return nil
 }
 
-// Root returns the remote's root hash (the default branch tip). Note: doltlite's
-// own sync client never calls this endpoint, and hosted servers may not
-// implement it.
 func (c *Client) Root(ctx context.Context) (prollyhash.Hash, error) {
 	var h prollyhash.Hash
 	status, body, err := c.do(ctx, http.MethodGet, remoteproto.EndpointRoot, nil)

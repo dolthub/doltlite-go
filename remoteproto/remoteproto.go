@@ -1,16 +1,3 @@
-// Package remoteproto defines the wire format of doltlite's HTTP sync protocol:
-// endpoint names, size limits, and the encoders/decoders for each request and
-// response body. It is shared by the client (package remote) and the server
-// (package litehttp) so both sides agree on the framing.
-//
-// The framing mirrors doltlite's C implementation
-// (github.com/dolthub/doltlite, src/doltlite_remotesrv.c and
-// src/doltlite_http_remote.c):
-//
-//   - has-chunks request:  N concatenated 20-byte hashes.
-//   - has-chunks response: N bytes, one per requested hash, non-zero == present.
-//   - chunks request:      repeated records of [20-byte hash][4-byte LE length][bytes].
-//   - refs-if request:     [20-byte expected refs hash][refs blob].
 package remoteproto
 
 import (
@@ -21,30 +8,24 @@ import (
 	"github.com/dolthub/doltlite-go/prollyhash"
 )
 
-// Endpoint path segments, relative to a repository's base path.
 const (
 	EndpointRoot      = "root"
 	EndpointHasChunks = "has-chunks"
-	EndpointChunk     = "chunk" // followed by /{hex}
+	EndpointChunk     = "chunk"
 	EndpointChunks    = "chunks"
 	EndpointRefs      = "refs"
 	EndpointRefsIf    = "refs-if"
 	EndpointCommit    = "commit"
 )
 
-// Size limits, matching doltlite's server (doltlite_remotesrv.c).
 const (
-	// MaxChunkBytes is the largest single chunk accepted in a chunks request.
 	MaxChunkBytes = 64 * 1024 * 1024
-	// MaxRequestBytes is the largest total request body accepted.
+
 	MaxRequestBytes = 128 * 1024 * 1024
 )
 
-// chunkLenSize is the width of the little-endian length prefix in the chunks
-// framing.
 const chunkLenSize = 4
 
-// EncodeHashes concatenates hashes into a has-chunks request body.
 func EncodeHashes(hashes []prollyhash.Hash) []byte {
 	out := make([]byte, 0, len(hashes)*prollyhash.Size)
 	for _, h := range hashes {
@@ -53,8 +34,6 @@ func EncodeHashes(hashes []prollyhash.Hash) []byte {
 	return out
 }
 
-// DecodeHashes parses a has-chunks request body into hashes. The body length
-// must be a multiple of the hash size.
 func DecodeHashes(body []byte) ([]prollyhash.Hash, error) {
 	if len(body)%prollyhash.Size != 0 {
 		return nil, fmt.Errorf("remoteproto: has-chunks body length %d not a multiple of %d", len(body), prollyhash.Size)
@@ -67,7 +46,6 @@ func DecodeHashes(body []byte) ([]prollyhash.Hash, error) {
 	return out, nil
 }
 
-// EncodePresence encodes a has-chunks response: one byte per hash, 1 == present.
 func EncodePresence(present []bool) []byte {
 	out := make([]byte, len(present))
 	for i, p := range present {
@@ -78,7 +56,6 @@ func EncodePresence(present []bool) []byte {
 	return out
 }
 
-// DecodePresence decodes a has-chunks response of the given expected length.
 func DecodePresence(body []byte, expect int) ([]bool, error) {
 	if len(body) != expect {
 		return nil, fmt.Errorf("remoteproto: has-chunks response length %d, want %d", len(body), expect)
@@ -90,9 +67,6 @@ func DecodePresence(body []byte, expect int) ([]bool, error) {
 	return out, nil
 }
 
-// EncodeChunks encodes chunks into a chunks request body. Each record is
-// [20-byte hash][4-byte LE length][bytes]. The hash is included for framing;
-// the server recomputes and verifies it (see package litehttp).
 func EncodeChunks(chunks []litestore.Chunk) []byte {
 	size := 0
 	for _, c := range chunks {
@@ -109,15 +83,6 @@ func EncodeChunks(chunks []litestore.Chunk) []byte {
 	return out
 }
 
-// DecodeChunks parses a chunks request body into chunks. Each Chunk.Hash is the
-// hash claimed on the wire; callers must verify it against the data. Chunks
-// larger than MaxChunkBytes, or a record that runs past the end of the body,
-// are rejected.
-//
-// This matches the C server's loop, which stops once a full record no longer
-// fits (a trailing partial record is ignored) — but unlike the C server, which
-// silently recomputes and ignores the wire hash, we surface the claimed hash so
-// the caller can verify integrity.
 func DecodeChunks(body []byte) ([]litestore.Chunk, error) {
 	var chunks []litestore.Chunk
 	off := 0
@@ -142,7 +107,6 @@ func DecodeChunks(body []byte) ([]litestore.Chunk, error) {
 	return chunks, nil
 }
 
-// EncodeRefsIf encodes a refs-if request body: [expected hash][blob].
 func EncodeRefsIf(expected prollyhash.Hash, blob []byte) []byte {
 	out := make([]byte, 0, prollyhash.Size+len(blob))
 	out = append(out, expected[:]...)
@@ -150,9 +114,6 @@ func EncodeRefsIf(expected prollyhash.Hash, blob []byte) []byte {
 	return out
 }
 
-// DecodeRefsIf parses a refs-if request body into the expected hash and the
-// refs blob. The body must be longer than a hash (the C server rejects a body
-// of exactly the hash size, which would carry an empty blob).
 func DecodeRefsIf(body []byte) (prollyhash.Hash, []byte, error) {
 	var expected prollyhash.Hash
 	if len(body) <= prollyhash.Size {

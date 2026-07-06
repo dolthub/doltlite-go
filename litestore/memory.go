@@ -7,8 +7,6 @@ import (
 	"github.com/dolthub/doltlite-go/prollyhash"
 )
 
-// MemStore is an in-memory Store, useful for tests and local development. It is
-// safe for concurrent use.
 type MemStore struct {
 	mu      sync.Mutex
 	chunks  map[prollyhash.Hash][]byte
@@ -16,7 +14,6 @@ type MemStore struct {
 	refsSet bool
 }
 
-// NewMemStore returns an empty in-memory store.
 func NewMemStore() *MemStore {
 	return &MemStore{chunks: make(map[prollyhash.Hash][]byte)}
 }
@@ -89,10 +86,6 @@ func (m *MemStore) setRefsLocked(blob []byte) {
 	m.refsSet = true
 }
 
-// refsHashLocked returns the current refs hash: the zero sentinel when there
-// are no refs, otherwise BLAKE3-20 of the refs blob. This mirrors doltlite's
-// refsTableGetHash, which the C server compares against the client-supplied
-// expected hash in handlePutRefsIf.
 func (m *MemStore) refsHashLocked() prollyhash.Hash {
 	if !m.refsSet {
 		return prollyhash.Hash{}

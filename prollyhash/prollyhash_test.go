@@ -2,8 +2,6 @@ package prollyhash
 
 import "testing"
 
-// seq returns n bytes where byte i == i mod 256, matching the buffers used by
-// doltlite's blake3_kat_test.sh.
 func seq(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
@@ -12,9 +10,6 @@ func seq(n int) []byte {
 	return b
 }
 
-// TestComputeGolden pins Compute against the known-answer vectors from
-// doltlite's own test/blake3_kat_test.sh. If these pass, our Go BLAKE3-20 port
-// is byte-identical to doltlite's prollyHashCompute.
 func TestComputeGolden(t *testing.T) {
 	cases := []struct {
 		name string
@@ -37,8 +32,6 @@ func TestComputeGolden(t *testing.T) {
 	}
 }
 
-// TestEmptyHashIsNotSentinel guards the distinction between "hash of empty
-// input" (a real BLAKE3 digest) and IsEmpty (the all-zero sentinel).
 func TestEmptyHashIsNotSentinel(t *testing.T) {
 	if Compute(nil).IsEmpty() {
 		t.Fatal("hash of empty input must not be the zero sentinel")
@@ -64,7 +57,7 @@ func TestParseErrors(t *testing.T) {
 	if _, err := Parse("abc"); err == nil {
 		t.Fatal("expected error for short hex")
 	}
-	// Correct length, invalid hex characters.
+
 	bad := ""
 	for i := 0; i < Size*2; i++ {
 		bad += "z"

@@ -14,15 +14,12 @@ import (
 	"github.com/dolthub/doltlite-go/remote"
 )
 
-// testProvider is a minimal StoreProvider: one MemStore per owner/repo, an
-// optional required bearer token, and an optional set of "missing" repos used
-// to exercise the not-found paths.
 type testProvider struct {
 	mu       sync.Mutex
 	stores   map[string]*litestore.MemStore
-	token    string          // if non-empty, required as "Bearer <token>"
-	missing  map[string]bool // repos that report ErrRepoNotFound
-	readOnly map[string]bool // repos that forbid writes
+	token    string
+	missing  map[string]bool
+	readOnly map[string]bool
 }
 
 func newTestProvider() *testProvider {
@@ -59,8 +56,6 @@ func chunk(s string) litestore.Chunk {
 	return litestore.Chunk{Hash: prollyhash.Compute(d), Data: d}
 }
 
-// TestPushPullRoundTrip walks a full push then a full pull through the real HTTP
-// stack: remote client -> httptest server -> litehttp handler -> MemStore.
 func TestPushPullRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))
@@ -70,7 +65,6 @@ func TestPushPullRoundTrip(t *testing.T) {
 
 	c1, c2 := chunk("first chunk"), chunk("second chunk")
 
-	// Before anything is pushed, neither chunk is present.
 	present, err := cl.HasChunks(ctx, []prollyhash.Hash{c1.Hash, c2.Hash})
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +73,6 @@ func TestPushPullRoundTrip(t *testing.T) {
 		t.Fatalf("expected both absent, got %v", present)
 	}
 
-	// Push chunks, then set refs (first push: expected = zero hash), then commit.
 	if err := cl.PutChunks(ctx, []litestore.Chunk{c1, c2}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +84,6 @@ func TestPushPullRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Pull side: chunks now present, fetchable, and refs readable.
 	present, err = cl.HasChunks(ctx, []prollyhash.Hash{c1.Hash, c2.Hash})
 	if err != nil {
 		t.Fatal(err)
@@ -129,8 +121,6 @@ func TestGetMissingChunkAndRefs(t *testing.T) {
 	}
 }
 
-// TestRefsIfConflict simulates two clients racing on refs: the second, holding a
-// stale expected hash, must get a 409 -> ErrConflict.
 func TestRefsIfConflict(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))
@@ -140,14 +130,12 @@ func TestRefsIfConflict(t *testing.T) {
 	if err := cl.SetRefsIf(ctx, prollyhash.Hash{}, []byte("v1")); err != nil {
 		t.Fatal(err)
 	}
-	// Another writer already advanced refs; this call still thinks refs are empty.
+
 	if err := cl.SetRefsIf(ctx, prollyhash.Hash{}, []byte("v2")); !errors.Is(err, remote.ErrConflict) {
 		t.Fatalf("stale SetRefsIf = %v, want ErrConflict", err)
 	}
 }
 
-// TestHasChunksOnMissingRepo verifies the doltlite behavior that has-chunks
-// against a not-yet-created repository returns all-absent rather than 404.
 func TestHasChunksOnMissingRepo(t *testing.T) {
 	ctx := context.Background()
 	p := newTestProvider()
@@ -164,7 +152,6 @@ func TestHasChunksOnMissingRepo(t *testing.T) {
 		t.Fatalf("expected [false], got %v", present)
 	}
 
-	// A read of an actual chunk on a missing repo is a 404, not all-absent.
 	if _, err := cl.GetChunk(ctx, prollyhash.Compute([]byte("x"))); !errors.Is(err, remote.ErrNotFound) {
 		t.Fatalf("GetChunk on missing repo = %v, want ErrNotFound", err)
 	}
@@ -177,13 +164,11 @@ func TestAuth(t *testing.T) {
 	srv := httptest.NewServer(litehttp.NewHandler(p))
 	defer srv.Close()
 
-	// No token: unauthorized.
 	anon := remote.New(srv.URL + "/acme/widgets")
 	if err := anon.PutChunks(ctx, []litestore.Chunk{chunk("x")}); err == nil {
 		t.Fatal("expected unauthorized error without token")
 	}
 
-	// With token: allowed.
 	authed := remote.New(srv.URL+"/acme/widgets", remote.WithBearerToken("s3cret"))
 	if err := authed.PutChunks(ctx, []litestore.Chunk{chunk("x")}); err != nil {
 		t.Fatalf("authed PutChunks: %v", err)
@@ -198,18 +183,15 @@ func TestWriteForbiddenReadAllowed(t *testing.T) {
 	defer srv.Close()
 	cl := remote.New(srv.URL + "/acme/widgets")
 
-	// Read is fine (empty repo -> all absent).
 	if _, err := cl.HasChunks(ctx, []prollyhash.Hash{prollyhash.Compute([]byte("x"))}); err != nil {
 		t.Fatalf("read on read-only repo: %v", err)
 	}
-	// Write is forbidden.
+
 	if err := cl.PutChunks(ctx, []litestore.Chunk{chunk("x")}); err == nil {
 		t.Fatal("expected forbidden error on write to read-only repo")
 	}
 }
 
-// TestChunkHashVerification confirms the handler rejects a chunk whose claimed
-// hash does not match its bytes (stricter than upstream doltlite).
 func TestChunkHashVerification(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))
