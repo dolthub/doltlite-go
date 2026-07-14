@@ -13,7 +13,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # Latest stable covers every module: the core is go 1.23 while the
+          # blobs3 submodule needs 1.24 (aws-sdk-go-v2).
+          go-version: stable
 
       - name: Check formatting
         run: |
