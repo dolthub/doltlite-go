@@ -28,8 +28,11 @@ type BlobStore interface {
 	// Get returns the full object, or ErrNotFound.
 	Get(ctx context.Context, key string) ([]byte, error)
 
-	// GetRange returns data[off:off+length]. A negative length reads to the end.
-	// off past the end returns an empty slice. Returns ErrNotFound for absent keys.
+	// GetRange returns length bytes starting at off. A negative length reads from
+	// off to the end; a zero length returns an empty slice. off and length must
+	// denote a range within the object (as the pack store always guarantees);
+	// behavior for an out-of-range request is backend-specific. Returns
+	// ErrNotFound for an absent key.
 	GetRange(ctx context.Context, key string, off, length int64) ([]byte, error)
 
 	// List returns all keys with the given prefix.

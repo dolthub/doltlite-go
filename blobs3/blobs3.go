@@ -64,6 +64,9 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (s *Store) GetRange(ctx context.Context, key string, off, length int64) ([]byte, error) {
+	if length == 0 {
+		return []byte{}, nil
+	}
 	var rng *string
 	if length < 0 {
 		rng = aws.String(fmt.Sprintf("bytes=%d-", off))
@@ -107,6 +110,9 @@ func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 		}
 		if out.IsTruncated == nil || !*out.IsTruncated {
 			break
+		}
+		if aws.ToString(out.NextContinuationToken) == "" {
+			return nil, fmt.Errorf("blobs3: list of %q reported more results but no continuation token", full)
 		}
 		token = out.NextContinuationToken
 	}
