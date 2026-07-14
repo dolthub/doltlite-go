@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # Vet and test every module in the repo (the root module plus any
+      # submodule, e.g. the future blobs3 S3 adapter with its own go.mod).
+      - name: Vet and test all modules
+        run: |
+          set -euo pipefail
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            echo "::group::$dir"
+            ( cd "$dir" && go vet ./... && go test -race ./... )
+            echo "::endgroup::"
+          done
