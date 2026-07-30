@@ -125,7 +125,7 @@ func (c *Client) GetRefs(ctx context.Context) ([]byte, error) {
 }
 
 func (c *Client) SetRefs(ctx context.Context, blob []byte) error {
-	status, _, err := c.do(ctx, http.MethodPut, remoteproto.EndpointRefs, blob)
+	status, _, err := c.do(ctx, http.MethodPut, remoteproto.EndpointRefs, remoteproto.EncodeRefs("", false, blob))
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (c *Client) SetRefs(ctx context.Context, blob []byte) error {
 }
 
 func (c *Client) SetRefsIf(ctx context.Context, expected prollyhash.Hash, blob []byte) error {
-	status, _, err := c.do(ctx, http.MethodPut, remoteproto.EndpointRefsIf, remoteproto.EncodeRefsIf(expected, blob))
+	status, _, err := c.do(ctx, http.MethodPut, remoteproto.EndpointRefsIf, remoteproto.EncodeRefsIf("", false, expected, blob))
 	if err != nil {
 		return err
 	}

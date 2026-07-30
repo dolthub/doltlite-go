@@ -1,8 +1,10 @@
 package litehttp_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -13,6 +15,51 @@ import (
 	"github.com/dolthub/doltlite-go/prollyhash"
 	"github.com/dolthub/doltlite-go/remote"
 )
+
+// TestRefsIfBranchScopedFirstPush reproduces the doltlite C client's first push
+// to a new repository at the raw wire level: a /refs-if body framed as
+// [u16 branchLen LE]["main"][u8 force=0][20B zero expected][blob] against an
+// empty store. The server must read the expected hash from the correct offset
+// (after the branch/force prefix), see it matches the empty store's zero refs,
+// and return 200 — not misread the prefix bytes as the expected hash and 409.
+func TestRefsIfBranchScopedFirstPush(t *testing.T) {
+	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))
+	defer srv.Close()
+
+	branch := "main"
+	blob := []byte("refs blob v1")
+	body := &bytes.Buffer{}
+	body.WriteByte(byte(len(branch)))      // branchLen low byte
+	body.WriteByte(byte(len(branch) >> 8)) // branchLen high byte
+	body.WriteString(branch)
+	body.WriteByte(0)                         // force = false
+	body.Write(make([]byte, prollyhash.Size)) // expected = zero (new repo)
+	body.Write(blob)
+
+	req, err := http.NewRequest(http.MethodPut, srv.URL+"/acme/widgets/refs-if", bytes.NewReader(body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		t.Fatalf("first branch-scoped refs-if = %d (%s), want 200", resp.StatusCode, bytes.TrimSpace(msg))
+	}
+
+	// The stored refs must be exactly the blob, with the branch/force/expected
+	// prefix stripped.
+	got, err := remote.New(srv.URL + "/acme/widgets").GetRefs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, blob) {
+		t.Fatalf("GetRefs = %q, want %q", got, blob)
+	}
+}
 
 type testProvider struct {
 	mu       sync.Mutex

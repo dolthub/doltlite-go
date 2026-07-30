@@ -107,19 +107,82 @@ func DecodeChunks(body []byte) ([]litestore.Chunk, error) {
 	return chunks, nil
 }
 
-func EncodeRefsIf(expected prollyhash.Hash, blob []byte) []byte {
-	out := make([]byte, 0, prollyhash.Size+len(blob))
+// The ref-update endpoints carry a branch-scope prefix so the server knows
+// which branch the push targets and whether it is forced. The layout matches
+// the doltlite C client (doltlite_http_remote.c):
+//
+//	PUT /refs     : [u16 branchLen LE][branch][u8 force][blob]
+//	PUT /refs-if  : [u16 branchLen LE][branch][u8 force][20B expected][blob]
+//
+// force==1 requests an unconditional update (skip the compare-and-swap).
+
+// EncodeRefs builds a PUT /refs body.
+func EncodeRefs(branch string, force bool, blob []byte) []byte {
+	out := make([]byte, 0, refsPrefixLen(branch)+len(blob))
+	out = appendRefsPrefix(out, branch, force)
+	out = append(out, blob...)
+	return out
+}
+
+// DecodeRefs parses a PUT /refs body.
+func DecodeRefs(body []byte) (branch string, force bool, blob []byte, err error) {
+	branch, force, rest, err := decodeRefsPrefix(body)
+	if err != nil {
+		return "", false, nil, err
+	}
+	return branch, force, append([]byte(nil), rest...), nil
+}
+
+// EncodeRefsIf builds a PUT /refs-if body.
+func EncodeRefsIf(branch string, force bool, expected prollyhash.Hash, blob []byte) []byte {
+	out := make([]byte, 0, refsPrefixLen(branch)+prollyhash.Size+len(blob))
+	out = appendRefsPrefix(out, branch, force)
 	out = append(out, expected[:]...)
 	out = append(out, blob...)
 	return out
 }
 
-func DecodeRefsIf(body []byte) (prollyhash.Hash, []byte, error) {
-	var expected prollyhash.Hash
-	if len(body) <= prollyhash.Size {
-		return expected, nil, fmt.Errorf("remoteproto: refs-if body length %d too short", len(body))
+// DecodeRefsIf parses a PUT /refs-if body.
+func DecodeRefsIf(body []byte) (branch string, force bool, expected prollyhash.Hash, blob []byte, err error) {
+	branch, force, rest, err := decodeRefsPrefix(body)
+	if err != nil {
+		return "", false, expected, nil, err
 	}
-	copy(expected[:], body[:prollyhash.Size])
-	blob := append([]byte(nil), body[prollyhash.Size:]...)
-	return expected, blob, nil
+	if len(rest) < prollyhash.Size {
+		return "", false, expected, nil, fmt.Errorf("remoteproto: refs-if body missing %d-byte expected hash", prollyhash.Size)
+	}
+	copy(expected[:], rest[:prollyhash.Size])
+	blob = append([]byte(nil), rest[prollyhash.Size:]...)
+	return branch, force, expected, blob, nil
+}
+
+func refsPrefixLen(branch string) int { return 2 + len(branch) + 1 }
+
+func appendRefsPrefix(out []byte, branch string, force bool) []byte {
+	n := len(branch)
+	out = append(out, byte(n), byte(n>>8)) // u16 little-endian branch length
+	out = append(out, branch...)
+	var f byte
+	if force {
+		f = 1
+	}
+	return append(out, f)
+}
+
+// decodeRefsPrefix reads [u16 branchLen LE][branch][u8 force] and returns the
+// bytes remaining after the prefix.
+func decodeRefsPrefix(body []byte) (branch string, force bool, rest []byte, err error) {
+	if len(body) < 3 { // 2-byte length + 1-byte force
+		return "", false, nil, fmt.Errorf("remoteproto: refs body length %d too short", len(body))
+	}
+	n := int(body[0]) | int(body[1])<<8
+	off := 2
+	if off+n+1 > len(body) {
+		return "", false, nil, fmt.Errorf("remoteproto: refs branch length %d runs past end of body", n)
+	}
+	branch = string(body[off : off+n])
+	off += n
+	force = body[off] != 0
+	off++
+	return branch, force, body[off:], nil
 }
