@@ -111,6 +111,33 @@ func TestRefsIfRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetChunksRoundTrip(t *testing.T) {
+	chunks := [][]byte{[]byte("alpha"), nil, {}, []byte("delta")}
+	got, err := DecodeGetChunks(EncodeGetChunks(chunks), len(chunks))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d entries, want 4", len(got))
+	}
+	if !bytes.Equal(got[0], []byte("alpha")) {
+		t.Fatalf("entry 0 = %q", got[0])
+	}
+	if got[1] != nil {
+		t.Fatalf("entry 1 (absent) = %q, want nil", got[1])
+	}
+	if got[2] == nil || len(got[2]) != 0 {
+		t.Fatalf("entry 2 (present empty) = %v, want non-nil empty", got[2])
+	}
+	if !bytes.Equal(got[3], []byte("delta")) {
+		t.Fatalf("entry 3 = %q", got[3])
+	}
+
+	if _, err := DecodeGetChunks([]byte{0x00, 0x00}, 1); err == nil {
+		t.Fatal("expected error for truncated get-chunks response")
+	}
+}
+
 func TestRefsRoundTrip(t *testing.T) {
 	blob := []byte("refs blob")
 	gotBranch, gotForce, gotBlob, err := DecodeRefs(EncodeRefs("feature/x", true, blob))

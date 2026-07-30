@@ -16,7 +16,12 @@ const (
 	EndpointRefs      = "refs"
 	EndpointRefsIf    = "refs-if"
 	EndpointCommit    = "commit"
+	EndpointGetChunks = "get-chunks"
 )
+
+// absentChunkLen marks an absent chunk in a get-chunks response (a length no
+// real chunk can reach, since chunks are bounded by MaxChunkBytes).
+const absentChunkLen = 0xFFFFFFFF
 
 const (
 	MaxChunkBytes = 64 * 1024 * 1024
@@ -32,6 +37,56 @@ func EncodeHashes(hashes []prollyhash.Hash) []byte {
 		out = append(out, h[:]...)
 	}
 	return out
+}
+
+// EncodeGetChunks builds a /get-chunks response body. For each requested hash
+// (in order) it writes a 4-byte big-endian length then that many payload bytes;
+// a nil entry (chunk absent) is written as the length 0xFFFFFFFF with no
+// payload. The request body is the concatenated hashes (see EncodeHashes).
+func EncodeGetChunks(chunks [][]byte) []byte {
+	size := 0
+	for _, c := range chunks {
+		size += chunkLenSize + len(c)
+	}
+	out := make([]byte, 0, size)
+	var hdr [chunkLenSize]byte
+	for _, c := range chunks {
+		if c == nil {
+			binary.BigEndian.PutUint32(hdr[:], absentChunkLen)
+			out = append(out, hdr[:]...)
+			continue
+		}
+		binary.BigEndian.PutUint32(hdr[:], uint32(len(c)))
+		out = append(out, hdr[:]...)
+		out = append(out, c...)
+	}
+	return out
+}
+
+// DecodeGetChunks parses a /get-chunks response body into n entries (n = the
+// number of requested hashes). An absent chunk (length 0xFFFFFFFF) decodes to a
+// nil entry; present chunks decode to their payload bytes.
+func DecodeGetChunks(body []byte, n int) ([][]byte, error) {
+	out := make([][]byte, n)
+	off := 0
+	for i := 0; i < n; i++ {
+		if off+chunkLenSize > len(body) {
+			return nil, fmt.Errorf("remoteproto: get-chunks response truncated at entry %d", i)
+		}
+		l := binary.BigEndian.Uint32(body[off : off+chunkLenSize])
+		off += chunkLenSize
+		if l == absentChunkLen {
+			continue
+		}
+		if int64(off)+int64(l) > int64(len(body)) {
+			return nil, fmt.Errorf("remoteproto: get-chunks entry %d length %d runs past end of body", i, l)
+		}
+		// Use a non-nil base so a present-but-empty chunk stays non-nil and is
+		// not confused with an absent (nil) entry.
+		out[i] = append([]byte{}, body[off:off+int(l)]...)
+		off += int(l)
+	}
+	return out, nil
 }
 
 func DecodeHashes(body []byte) ([]prollyhash.Hash, error) {

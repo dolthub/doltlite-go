@@ -154,6 +154,36 @@ func TestPushPullRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetChunksBatched(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))
+	defer srv.Close()
+	cl := remote.New(srv.URL + "/acme/widgets")
+
+	c1, c2 := chunk("first chunk"), chunk("second chunk")
+	if err := cl.PutChunks(ctx, []litestore.Chunk{c1, c2}); err != nil {
+		t.Fatal(err)
+	}
+
+	absent := prollyhash.Compute([]byte("nope"))
+	got, err := cl.GetChunks(ctx, []prollyhash.Hash{c1.Hash, absent, c2.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("GetChunks returned %d entries, want 3", len(got))
+	}
+	if !bytes.Equal(got[0], []byte("first chunk")) {
+		t.Fatalf("entry 0 = %q, want %q", got[0], "first chunk")
+	}
+	if got[1] != nil {
+		t.Fatalf("entry 1 (absent) = %q, want nil", got[1])
+	}
+	if !bytes.Equal(got[2], []byte("second chunk")) {
+		t.Fatalf("entry 2 = %q, want %q", got[2], "second chunk")
+	}
+}
+
 func TestGetMissingChunkAndRefs(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))

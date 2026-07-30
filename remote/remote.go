@@ -83,6 +83,19 @@ func (c *Client) HasChunks(ctx context.Context, hashes []prollyhash.Hash) ([]boo
 	return remoteproto.DecodePresence(body, len(hashes))
 }
 
+// GetChunks fetches many chunks in one request. The returned slice has one
+// entry per requested hash, in order; an absent chunk is a nil entry.
+func (c *Client) GetChunks(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error) {
+	status, body, err := c.do(ctx, http.MethodPost, remoteproto.EndpointGetChunks, remoteproto.EncodeHashes(hashes))
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, statusError("get-chunks", status)
+	}
+	return remoteproto.DecodeGetChunks(body, len(hashes))
+}
+
 func (c *Client) GetChunk(ctx context.Context, h prollyhash.Hash) ([]byte, error) {
 	status, body, err := c.do(ctx, http.MethodGet, remoteproto.EndpointChunk+"/"+h.String(), nil)
 	if err != nil {
