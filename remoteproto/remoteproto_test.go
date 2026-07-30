@@ -88,15 +88,40 @@ func TestDecodeChunksTruncated(t *testing.T) {
 func TestRefsIfRoundTrip(t *testing.T) {
 	expected := prollyhash.Compute([]byte("prev refs"))
 	blob := []byte("new refs blob")
-	gotExpected, gotBlob, err := DecodeRefsIf(EncodeRefsIf(expected, blob))
+	gotBranch, gotForce, gotExpected, gotBlob, err := DecodeRefsIf(EncodeRefsIf("main", false, expected, blob))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotExpected != expected || !bytes.Equal(gotBlob, blob) {
-		t.Fatal("refs-if round trip mismatch")
+	if gotBranch != "main" || gotForce || gotExpected != expected || !bytes.Equal(gotBlob, blob) {
+		t.Fatalf("refs-if round trip mismatch: branch=%q force=%v", gotBranch, gotForce)
 	}
 
-	if _, _, err := DecodeRefsIf(make([]byte, prollyhash.Size)); err == nil {
-		t.Fatal("expected error for empty blob")
+	// A forced refs-if with an empty branch and empty blob still round-trips.
+	gotBranch, gotForce, _, gotBlob, err = DecodeRefsIf(EncodeRefsIf("", true, prollyhash.Hash{}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBranch != "" || !gotForce || len(gotBlob) != 0 {
+		t.Fatalf("forced refs-if round trip mismatch: branch=%q force=%v blob=%q", gotBranch, gotForce, gotBlob)
+	}
+
+	// Too short to hold the expected hash after the prefix.
+	if _, _, _, _, err := DecodeRefsIf(EncodeRefs("main", false, nil)); err == nil {
+		t.Fatal("expected error for refs-if body missing expected hash")
+	}
+}
+
+func TestRefsRoundTrip(t *testing.T) {
+	blob := []byte("refs blob")
+	gotBranch, gotForce, gotBlob, err := DecodeRefs(EncodeRefs("feature/x", true, blob))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBranch != "feature/x" || !gotForce || !bytes.Equal(gotBlob, blob) {
+		t.Fatalf("refs round trip mismatch: branch=%q force=%v blob=%q", gotBranch, gotForce, gotBlob)
+	}
+
+	if _, _, _, err := DecodeRefs([]byte{0x00}); err == nil {
+		t.Fatal("expected error for truncated refs prefix")
 	}
 }

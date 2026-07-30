@@ -141,23 +141,40 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if len(body) == 0 {
+		// PUT /refs is an unconditional set. The branch/force prefix is parsed
+		// off the body; the store keeps a single opaque refs blob, so the branch
+		// scope is not yet enforced (see TODO below).
+		_, _, blob, derr := remoteproto.DecodeRefs(body)
+		if derr != nil {
+			http.Error(w, derr.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(blob) == 0 {
 			http.Error(w, "empty refs blob", http.StatusBadRequest)
 			return
 		}
-		if serr := store.SetRefs(ctx, body); serr != nil {
+		if serr := store.SetRefs(ctx, blob); serr != nil {
 			serverError(w, serr)
 			return
 		}
 		writeOK(w, nil)
 
 	case remoteproto.EndpointRefsIf:
-		expected, blob, derr := remoteproto.DecodeRefsIf(body)
+		// TODO: the branch prefix declares which branch the push targets; a
+		// future change could reject updates that touch any other branch. The
+		// store's compare-and-swap is over the whole refs blob for now.
+		_, force, expected, blob, derr := remoteproto.DecodeRefsIf(body)
 		if derr != nil {
 			http.Error(w, derr.Error(), http.StatusBadRequest)
 			return
 		}
-		serr := store.SetRefsIf(ctx, expected, blob)
+		var serr error
+		if force {
+			// A forced push skips the compare-and-swap.
+			serr = store.SetRefs(ctx, blob)
+		} else {
+			serr = store.SetRefsIf(ctx, expected, blob)
+		}
 		if errors.Is(serr, litestore.ErrConflict) {
 			http.Error(w, "refs precondition failed", http.StatusConflict)
 			return
