@@ -90,6 +90,30 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, remoteproto.EncodePresence(present))
 
+	case remoteproto.EndpointGetChunks:
+		hashes, derr := remoteproto.DecodeHashes(body)
+		if derr != nil {
+			http.Error(w, derr.Error(), http.StatusBadRequest)
+			return
+		}
+		// Batched fetch: one entry per requested hash, absent chunks encoded as
+		// nil. TODO: PackStore.Get rebuilds its index per call; a batched store
+		// read would avoid re-scanning the index for every hash here.
+		chunks := make([][]byte, len(hashes))
+		for i, h := range hashes {
+			data, gerr := store.Get(ctx, h)
+			if errors.Is(gerr, litestore.ErrNotFound) {
+				chunks[i] = nil
+				continue
+			}
+			if gerr != nil {
+				serverError(w, gerr)
+				return
+			}
+			chunks[i] = data
+		}
+		writeOK(w, remoteproto.EncodeGetChunks(chunks))
+
 	case remoteproto.EndpointChunk:
 		hsh, perr := prollyhash.Parse(tail)
 		if perr != nil {
@@ -222,6 +246,8 @@ func parsePath(p string) (owner, repo, endpoint, tail string, ok bool) {
 func classify(method, endpoint string) (write, known, methodOK bool) {
 	switch endpoint {
 	case remoteproto.EndpointHasChunks:
+		return false, true, method == http.MethodPost
+	case remoteproto.EndpointGetChunks:
 		return false, true, method == http.MethodPost
 	case remoteproto.EndpointChunk:
 		return false, true, method == http.MethodGet
