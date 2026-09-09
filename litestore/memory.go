@@ -19,6 +19,7 @@ func NewMemStore() *MemStore {
 }
 
 var _ Store = (*MemStore)(nil)
+var _ BatchGetter = (*MemStore)(nil)
 
 func (m *MemStore) HasMany(_ context.Context, hashes []prollyhash.Hash) ([]bool, error) {
 	m.mu.Lock()
@@ -39,6 +40,18 @@ func (m *MemStore) Get(_ context.Context, h prollyhash.Hash) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 	return append([]byte(nil), data...), nil
+}
+
+func (m *MemStore) GetMany(_ context.Context, hashes []prollyhash.Hash) ([][]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([][]byte, len(hashes))
+	for i, h := range hashes {
+		if data, ok := m.chunks[h]; ok {
+			out[i] = append([]byte(nil), data...)
+		}
+	}
+	return out, nil
 }
 
 func (m *MemStore) Put(_ context.Context, chunks []Chunk) error {

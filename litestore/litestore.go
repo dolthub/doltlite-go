@@ -31,3 +31,8 @@ type Store interface {
 
 	Commit(ctx context.Context) error
 }
+
+// BatchGetter returns one entry per requested hash. Missing chunks are nil.
+type BatchGetter interface {
+	GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error)
+}

@@ -1,6 +1,7 @@
 package litehttp
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -96,21 +97,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, derr.Error(), http.StatusBadRequest)
 			return
 		}
-		// Batched fetch: one entry per requested hash, absent chunks encoded as
-		// nil. TODO: PackStore.Get rebuilds its index per call; a batched store
-		// read would avoid re-scanning the index for every hash here.
-		chunks := make([][]byte, len(hashes))
-		for i, h := range hashes {
-			data, gerr := store.Get(ctx, h)
-			if errors.Is(gerr, litestore.ErrNotFound) {
-				chunks[i] = nil
-				continue
-			}
-			if gerr != nil {
-				serverError(w, gerr)
-				return
-			}
-			chunks[i] = data
+		chunks, gerr := getChunks(ctx, store, hashes)
+		if gerr != nil {
+			serverError(w, gerr)
+			return
 		}
 		writeOK(w, remoteproto.EncodeGetChunks(chunks))
 
@@ -220,6 +210,24 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		http.Error(w, "root endpoint not implemented", http.StatusNotImplemented)
 	}
+}
+
+func getChunks(ctx context.Context, store litestore.Store, hashes []prollyhash.Hash) ([][]byte, error) {
+	if batch, ok := store.(litestore.BatchGetter); ok {
+		return batch.GetMany(ctx, hashes)
+	}
+	chunks := make([][]byte, len(hashes))
+	for i, h := range hashes {
+		data, err := store.Get(ctx, h)
+		if errors.Is(err, litestore.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		chunks[i] = data
+	}
+	return chunks, nil
 }
 
 func (h *handler) hasChunksMissing(w http.ResponseWriter, body []byte) {
