@@ -19,7 +19,6 @@ func NewMemStore() *MemStore {
 }
 
 var _ Store = (*MemStore)(nil)
-var _ BatchGetter = (*MemStore)(nil)
 
 func (m *MemStore) HasMany(_ context.Context, hashes []prollyhash.Hash) ([]bool, error) {
 	m.mu.Lock()

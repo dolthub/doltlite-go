@@ -21,6 +21,8 @@ type Store interface {
 
 	Get(ctx context.Context, h prollyhash.Hash) ([]byte, error)
 
+	GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error)
+
 	Put(ctx context.Context, chunks []Chunk) error
 
 	GetRefs(ctx context.Context) ([]byte, error)
@@ -30,9 +32,4 @@ type Store interface {
 	SetRefsIf(ctx context.Context, expected prollyhash.Hash, blob []byte) error
 
 	Commit(ctx context.Context) error
-}
-
-// BatchGetter returns one entry per requested hash. Missing chunks are nil.
-type BatchGetter interface {
-	GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error)
 }

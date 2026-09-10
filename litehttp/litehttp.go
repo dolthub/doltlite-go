@@ -1,7 +1,6 @@
 package litehttp
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -97,7 +96,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, derr.Error(), http.StatusBadRequest)
 			return
 		}
-		chunks, gerr := getChunks(ctx, store, hashes)
+		chunks, gerr := store.GetMany(ctx, hashes)
 		if gerr != nil {
 			serverError(w, gerr)
 			return
@@ -210,24 +209,6 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		http.Error(w, "root endpoint not implemented", http.StatusNotImplemented)
 	}
-}
-
-func getChunks(ctx context.Context, store litestore.Store, hashes []prollyhash.Hash) ([][]byte, error) {
-	if batch, ok := store.(litestore.BatchGetter); ok {
-		return batch.GetMany(ctx, hashes)
-	}
-	chunks := make([][]byte, len(hashes))
-	for i, h := range hashes {
-		data, err := store.Get(ctx, h)
-		if errors.Is(err, litestore.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		chunks[i] = data
-	}
-	return chunks, nil
 }
 
 func (h *handler) hasChunksMissing(w http.ResponseWriter, body []byte) {

@@ -37,7 +37,6 @@ func NewPackStore(blobs blob.BlobStore, man blob.ManifestStore) *PackStore {
 }
 
 var _ Store = (*PackStore)(nil)
-var _ BatchGetter = (*PackStore)(nil)
 
 // idxEntry locates one chunk within its pack blob. The pack key is derived from
 // the index blob's key, so it need not be repeated per entry.
