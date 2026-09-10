@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/dolthub/doltlite-go/blob"
 	"github.com/dolthub/doltlite-go/prollyhash"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	packKeyPrefix = "pack/"
-	idxKeyPrefix  = "idx/"
+	packKeyPrefix      = "pack/"
+	idxKeyPrefix       = "idx/"
+	maxReadConcurrency = 32
 
 	// manifestCASRetries bounds optimistic-concurrency retries on the refs
 	// pointer before giving up with ErrConflict.
@@ -28,12 +31,17 @@ const (
 // an S3 BlobStore + DynamoDB ManifestStore for hosted use, or the in-memory ones
 // for tests.
 type PackStore struct {
-	blobs blob.BlobStore
-	man   blob.ManifestStore
+	blobs     blob.BlobStore
+	man       blob.ManifestStore
+	readSlots chan struct{}
 }
 
 func NewPackStore(blobs blob.BlobStore, man blob.ManifestStore) *PackStore {
-	return &PackStore{blobs: blobs, man: man}
+	return &PackStore{
+		blobs:     blobs,
+		man:       man,
+		readSlots: make(chan struct{}, maxReadConcurrency),
+	}
 }
 
 var _ Store = (*PackStore)(nil)
@@ -83,6 +91,40 @@ type chunkLoc struct {
 	packKey string
 	off     int64
 	length  int64
+	order   int
+}
+
+type indexedChunkLoc struct {
+	hash prollyhash.Hash
+	loc  chunkLoc
+}
+
+func (p *PackStore) acquireRead(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case p.readSlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *PackStore) getBlob(ctx context.Context, key string) ([]byte, error) {
+	if err := p.acquireRead(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-p.readSlots }()
+	return p.blobs.Get(ctx, key)
+}
+
+func (p *PackStore) getBlobRange(ctx context.Context, key string, off, length int64) ([]byte, error) {
+	if err := p.acquireRead(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-p.readSlots }()
+	return p.blobs.GetRange(ctx, key, off, length)
 }
 
 // buildIndex discovers every pack by listing index blobs and returns a map from
@@ -93,28 +135,54 @@ func (p *PackStore) buildIndex(ctx context.Context) (map[prollyhash.Hash]chunkLo
 		return nil, err
 	}
 	idx := make(map[prollyhash.Hash]chunkLoc)
-	for _, k := range keys {
-		data, err := p.blobs.Get(ctx, k)
-		if err != nil {
-			if errors.Is(err, blob.ErrNotFound) {
-				continue
-			}
-			return nil, err
+	var mu sync.Mutex
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(maxReadConcurrency)
+	for order, key := range keys {
+		if groupCtx.Err() != nil {
+			break
 		}
-		var entries []idxEntry
-		if err := json.Unmarshal(data, &entries); err != nil {
-			return nil, fmt.Errorf("litestore: corrupt index %s: %w", k, err)
-		}
-		packKey := packKeyPrefix + strings.TrimPrefix(k, idxKeyPrefix)
-		for _, e := range entries {
-			h, err := prollyhash.Parse(e.H)
+		order, key := order, key
+		group.Go(func() error {
+			data, err := p.getBlob(groupCtx, key)
 			if err != nil {
-				return nil, fmt.Errorf("litestore: corrupt index %s: %w", k, err)
+				if errors.Is(err, blob.ErrNotFound) {
+					return nil
+				}
+				return err
 			}
-			if _, ok := idx[h]; !ok {
-				idx[h] = chunkLoc{packKey: packKey, off: e.O, length: e.L}
+			var entries []idxEntry
+			if err := json.Unmarshal(data, &entries); err != nil {
+				return fmt.Errorf("litestore: corrupt index %s: %w", key, err)
 			}
-		}
+			packKey := packKeyPrefix + strings.TrimPrefix(key, idxKeyPrefix)
+			locations := make([]indexedChunkLoc, len(entries))
+			for i, entry := range entries {
+				h, err := prollyhash.Parse(entry.H)
+				if err != nil {
+					return fmt.Errorf("litestore: corrupt index %s: %w", key, err)
+				}
+				locations[i] = indexedChunkLoc{
+					hash: h,
+					loc:  chunkLoc{packKey: packKey, off: entry.O, length: entry.L, order: order},
+				}
+			}
+			mu.Lock()
+			for _, location := range locations {
+				current, ok := idx[location.hash]
+				if !ok || location.loc.order < current.order {
+					idx[location.hash] = location.loc
+				}
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return idx, nil
 }
@@ -140,7 +208,7 @@ func (p *PackStore) Get(ctx context.Context, h prollyhash.Hash) ([]byte, error) 
 	if !ok {
 		return nil, ErrNotFound
 	}
-	return p.blobs.GetRange(ctx, loc.packKey, loc.off, loc.length)
+	return p.getBlobRange(ctx, loc.packKey, loc.off, loc.length)
 }
 
 func (p *PackStore) GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error) {
@@ -149,22 +217,47 @@ func (p *PackStore) GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]
 		return nil, err
 	}
 	out := make([][]byte, len(hashes))
-	fetched := make(map[prollyhash.Hash][]byte)
+	type readJob struct {
+		loc       chunkLoc
+		positions []int
+	}
+	jobsByHash := make(map[prollyhash.Hash]int)
+	jobs := make([]readJob, 0, len(hashes))
 	for i, h := range hashes {
-		if data, ok := fetched[h]; ok {
-			out[i] = data
+		if job, ok := jobsByHash[h]; ok {
+			jobs[job].positions = append(jobs[job].positions, i)
 			continue
 		}
 		loc, ok := idx[h]
 		if !ok {
 			continue
 		}
-		data, err := p.blobs.GetRange(ctx, loc.packKey, loc.off, loc.length)
-		if err != nil {
-			return nil, err
+		jobsByHash[h] = len(jobs)
+		jobs = append(jobs, readJob{loc: loc, positions: []int{i}})
+	}
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(maxReadConcurrency)
+	for i := range jobs {
+		if groupCtx.Err() != nil {
+			break
 		}
-		fetched[h] = data
-		out[i] = data
+		job := &jobs[i]
+		group.Go(func() error {
+			data, err := p.getBlobRange(groupCtx, job.loc.packKey, job.loc.off, job.loc.length)
+			if err != nil {
+				return err
+			}
+			for _, position := range job.positions {
+				out[position] = data
+			}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
