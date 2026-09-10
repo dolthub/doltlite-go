@@ -184,6 +184,58 @@ func TestGetChunksBatched(t *testing.T) {
 	}
 }
 
+type batchTrackingStore struct {
+	litestore.Store
+	batchCalls  int
+	scalarCalls int
+}
+
+func (s *batchTrackingStore) Get(ctx context.Context, hash prollyhash.Hash) ([]byte, error) {
+	s.scalarCalls++
+	return s.Store.Get(ctx, hash)
+}
+
+func (s *batchTrackingStore) GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error) {
+	s.batchCalls++
+	chunks := make([][]byte, len(hashes))
+	for i, hash := range hashes {
+		data, err := s.Store.Get(ctx, hash)
+		if errors.Is(err, litestore.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		chunks[i] = data
+	}
+	return chunks, nil
+}
+
+func TestGetChunksUsesBatchGetter(t *testing.T) {
+	ctx := context.Background()
+	store := &batchTrackingStore{Store: litestore.NewMemStore()}
+	c1, c2 := chunk("first chunk"), chunk("second chunk")
+	if err := store.Put(ctx, []litestore.Chunk{c1, c2}); err != nil {
+		t.Fatal(err)
+	}
+	provider := litehttp.StoreProviderFunc(func(*http.Request, string, string, bool) (litestore.Store, error) {
+		return store, nil
+	})
+	srv := httptest.NewServer(litehttp.NewHandler(provider))
+	defer srv.Close()
+
+	got, err := remote.New(srv.URL+"/acme/widgets").GetChunks(ctx, []prollyhash.Hash{c1.Hash, c2.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !bytes.Equal(got[0], c1.Data) || !bytes.Equal(got[1], c2.Data) {
+		t.Fatalf("GetChunks = %q", got)
+	}
+	if store.batchCalls != 1 || store.scalarCalls != 0 {
+		t.Fatalf("store calls = batch:%d scalar:%d, want 1, 0", store.batchCalls, store.scalarCalls)
+	}
+}
+
 func TestGetMissingChunkAndRefs(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))

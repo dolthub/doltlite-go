@@ -21,6 +21,8 @@ type Store interface {
 
 	Get(ctx context.Context, h prollyhash.Hash) ([]byte, error)
 
+	GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error)
+
 	Put(ctx context.Context, chunks []Chunk) error
 
 	GetRefs(ctx context.Context) ([]byte, error)

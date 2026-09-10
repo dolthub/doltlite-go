@@ -96,21 +96,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, derr.Error(), http.StatusBadRequest)
 			return
 		}
-		// Batched fetch: one entry per requested hash, absent chunks encoded as
-		// nil. TODO: PackStore.Get rebuilds its index per call; a batched store
-		// read would avoid re-scanning the index for every hash here.
-		chunks := make([][]byte, len(hashes))
-		for i, h := range hashes {
-			data, gerr := store.Get(ctx, h)
-			if errors.Is(gerr, litestore.ErrNotFound) {
-				chunks[i] = nil
-				continue
-			}
-			if gerr != nil {
-				serverError(w, gerr)
-				return
-			}
-			chunks[i] = data
+		chunks, gerr := store.GetMany(ctx, hashes)
+		if gerr != nil {
+			serverError(w, gerr)
+			return
 		}
 		writeOK(w, remoteproto.EncodeGetChunks(chunks))
 

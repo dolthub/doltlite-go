@@ -10,6 +10,28 @@ import (
 	"github.com/dolthub/doltlite-go/prollyhash"
 )
 
+type countingBlobStore struct {
+	blob.BlobStore
+	lists      int
+	gets       int
+	rangeReads int
+}
+
+func (s *countingBlobStore) List(ctx context.Context, prefix string) ([]string, error) {
+	s.lists++
+	return s.BlobStore.List(ctx, prefix)
+}
+
+func (s *countingBlobStore) Get(ctx context.Context, key string) ([]byte, error) {
+	s.gets++
+	return s.BlobStore.Get(ctx, key)
+}
+
+func (s *countingBlobStore) GetRange(ctx context.Context, key string, off, length int64) ([]byte, error) {
+	s.rangeReads++
+	return s.BlobStore.GetRange(ctx, key, off, length)
+}
+
 func TestPackStoreRejectsCorruptChunk(t *testing.T) {
 	ctx := context.Background()
 	p := NewPackStore(blob.NewMemBlobStore(), blob.NewMemManifestStore())
@@ -57,6 +79,31 @@ func TestPackStoreGetSpansMultiplePacks(t *testing.T) {
 		if err != nil || !bytes.Equal(got, want.Data) {
 			t.Fatalf("Get(%s) = %q, %v", want.Hash, got, err)
 		}
+	}
+}
+
+func TestPackStoreGetManyBuildsIndexOnce(t *testing.T) {
+	ctx := context.Background()
+	bs := &countingBlobStore{BlobStore: blob.NewMemBlobStore()}
+	p := NewPackStore(bs, blob.NewMemManifestStore())
+
+	a, b := chunk("first"), chunk("second")
+	if err := p.Put(ctx, []Chunk{a}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Put(ctx, []Chunk{b}); err != nil {
+		t.Fatal(err)
+	}
+	missing := prollyhash.Compute([]byte("missing"))
+	got, err := p.GetMany(ctx, []prollyhash.Hash{a.Hash, missing, b.Hash, a.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 || !bytes.Equal(got[0], a.Data) || got[1] != nil || !bytes.Equal(got[2], b.Data) || !bytes.Equal(got[3], a.Data) {
+		t.Fatalf("GetMany = %q", got)
+	}
+	if bs.lists != 1 || bs.gets != 2 || bs.rangeReads != 2 {
+		t.Fatalf("blob reads = lists:%d gets:%d ranges:%d, want 1, 2, 2", bs.lists, bs.gets, bs.rangeReads)
 	}
 }
 

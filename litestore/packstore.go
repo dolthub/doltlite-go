@@ -143,6 +143,32 @@ func (p *PackStore) Get(ctx context.Context, h prollyhash.Hash) ([]byte, error) 
 	return p.blobs.GetRange(ctx, loc.packKey, loc.off, loc.length)
 }
 
+func (p *PackStore) GetMany(ctx context.Context, hashes []prollyhash.Hash) ([][]byte, error) {
+	idx, err := p.buildIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]byte, len(hashes))
+	fetched := make(map[prollyhash.Hash][]byte)
+	for i, h := range hashes {
+		if data, ok := fetched[h]; ok {
+			out[i] = data
+			continue
+		}
+		loc, ok := idx[h]
+		if !ok {
+			continue
+		}
+		data, err := p.blobs.GetRange(ctx, loc.packKey, loc.off, loc.length)
+		if err != nil {
+			return nil, err
+		}
+		fetched[h] = data
+		out[i] = data
+	}
+	return out, nil
+}
+
 // Commit is a no-op: pack and index blobs are durable as soon as Put returns.
 // The refs compare-and-swap is what publishes a push.
 func (p *PackStore) Commit(_ context.Context) error { return nil }
