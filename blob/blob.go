@@ -19,7 +19,8 @@ var ErrConflict = errors.New("blob: compare-and-swap version conflict")
 
 // BlobStore is immutable, uniquely-keyed object storage. A key is written at
 // most once (the pack store keys objects by content hash), so there are no
-// conditional writes and reads are stable once a key exists.
+// conditional writes and reads are stable once a key exists. Methods must be
+// safe for concurrent use.
 type BlobStore interface {
 	// Put stores data under key. Writing the same key with identical bytes is
 	// idempotent; keys are never overwritten with different content.
