@@ -14,6 +14,7 @@ import (
 	"github.com/dolthub/doltlite-go/litestore"
 	"github.com/dolthub/doltlite-go/prollyhash"
 	"github.com/dolthub/doltlite-go/remote"
+	"github.com/dolthub/doltlite-go/remoteproto"
 )
 
 // TestRefsIfBranchScopedFirstPush reproduces the doltlite C client's first push
@@ -181,6 +182,49 @@ func TestGetChunksBatched(t *testing.T) {
 	}
 	if !bytes.Equal(got[2], []byte("second chunk")) {
 		t.Fatalf("entry 2 = %q, want %q", got[2], "second chunk")
+	}
+}
+
+func TestGetChunksSetsContentLength(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(litehttp.NewHandler(newTestProvider()))
+	defer srv.Close()
+	cl := remote.New(srv.URL + "/acme/widgets")
+
+	c := chunk(string(bytes.Repeat([]byte("x"), 4096)))
+	if err := cl.PutChunks(ctx, []litestore.Chunk{c}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		srv.URL+"/acme/widgets/get-chunks",
+		bytes.NewReader(remoteproto.EncodeHashes([]prollyhash.Hash{c.Hash})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if resp.ContentLength != int64(len(c.Data)+4) {
+		t.Fatalf("Content-Length = %d, want %d", resp.ContentLength, len(c.Data)+4)
+	}
+	if len(resp.TransferEncoding) != 0 {
+		t.Fatalf("Transfer-Encoding = %v, want none", resp.TransferEncoding)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := remoteproto.DecodeGetChunks(body, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !bytes.Equal(got[0], c.Data) {
+		t.Fatal("GetChunks response body does not match the stored chunk")
 	}
 }
 

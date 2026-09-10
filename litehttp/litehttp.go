@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dolthub/doltlite-go/litestore"
@@ -268,6 +269,7 @@ func readBody(r *http.Request) (body []byte, tooLarge bool, err error) {
 
 func writeOK(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
 	if len(body) > 0 {
 		_, _ = w.Write(body)
