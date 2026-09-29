@@ -65,9 +65,12 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body []byte) (
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, remoteproto.MaxRequestBytes))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, remoteproto.MaxRequestBytes+1))
 	if err != nil {
 		return resp.StatusCode, nil, err
+	}
+	if len(respBody) > remoteproto.MaxRequestBytes {
+		return resp.StatusCode, nil, fmt.Errorf("remote: response body exceeds max %d", remoteproto.MaxRequestBytes)
 	}
 	return resp.StatusCode, respBody, nil
 }

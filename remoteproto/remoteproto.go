@@ -19,14 +19,12 @@ const (
 	EndpointGetChunks = "get-chunks"
 )
 
-// absentChunkLen marks an absent chunk in a get-chunks response (a length no
-// real chunk can reach, since chunks are bounded by MaxChunkBytes).
+// absentChunkLen marks an absent chunk in a get-chunks response.
 const absentChunkLen = 0xFFFFFFFF
 
 const (
-	MaxChunkBytes = 64 * 1024 * 1024
-
-	MaxRequestBytes = 128 * 1024 * 1024
+	MaxRequestBytes = 1024 * 1024 * 1024
+	MaxChunkBytes   = MaxRequestBytes
 )
 
 const chunkLenSize = 4

@@ -85,6 +85,26 @@ func TestDecodeChunksTruncated(t *testing.T) {
 	}
 }
 
+func TestDecodeChunkAbovePreviousLimit(t *testing.T) {
+	d := bytes.Repeat([]byte{'x'}, 64*1024*1024+1)
+	in := []litestore.Chunk{{Hash: prollyhash.Compute(d), Data: d}}
+	out, err := DecodeChunks(EncodeChunks(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Hash != in[0].Hash || !bytes.Equal(out[0].Data, d) {
+		t.Fatal("large chunk did not round trip")
+	}
+}
+
+func TestRequestLimitAccommodatesSQLiteMaximumLength(t *testing.T) {
+	const sqliteMaxLength = 1_000_000_000
+	const chunkEnvelopeBytes = prollyhash.Size + chunkLenSize
+	if MaxRequestBytes < sqliteMaxLength+chunkEnvelopeBytes {
+		t.Fatalf("MaxRequestBytes = %d, want at least %d", MaxRequestBytes, sqliteMaxLength+chunkEnvelopeBytes)
+	}
+}
+
 func TestRefsIfRoundTrip(t *testing.T) {
 	expected := prollyhash.Compute([]byte("prev refs"))
 	blob := []byte("new refs blob")
