@@ -1,6 +1,7 @@
 package refsblob
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"os"
@@ -192,4 +193,39 @@ func TestDecodeCorrupt(t *testing.T) {
 		b = binary.LittleEndian.AppendUint32(b, 0x80000000)
 		mustCorrupt(t, b)
 	})
+}
+
+func TestEncodeRoundTrip(t *testing.T) {
+	for _, name := range []string{"basic.bin", "explicit.bin", "clone.bin"} {
+		t.Run(name, func(t *testing.T) {
+			blob := load(t, name)
+			refs, err := Decode(blob)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := Encode(refs); !bytes.Equal(got, blob) {
+				t.Fatalf("Encode(Decode(%s)) differs from the original", name)
+			}
+		})
+	}
+}
+
+func TestSetRemote(t *testing.T) {
+	refs, err := Decode(load(t, "clone.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := len(refs.Remotes)
+	refs.SetRemote("dolthub", "http://127.0.0.1:9480/acme/widgets")
+	refs.SetRemote("dolthub", "http://127.0.0.1:9480/acme/gadgets")
+	again, err := Decode(Encode(refs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Remotes) != n+1 {
+		t.Fatalf("remotes = %v", again.Remotes)
+	}
+	if last := again.Remotes[n]; last.Name != "dolthub" || last.URL != "http://127.0.0.1:9480/acme/gadgets" {
+		t.Fatalf("added remote = %+v", last)
+	}
 }

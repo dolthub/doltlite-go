@@ -1,7 +1,8 @@
-// Package refsblob decodes doltlite's refs blob, the chunk a doltlite remote's
-// root hash points at. It mirrors csDecodeRefsV7 in doltlite's
-// src/chunk_refs.c byte for byte, including its corruption checks, so a blob
-// this package accepts is exactly a blob doltlite accepts.
+// Package refsblob decodes and encodes doltlite's refs blob, the chunk a
+// doltlite remote's root hash points at. Decode mirrors csDecodeRefsV7 in
+// doltlite's src/chunk_refs.c byte for byte, including its corruption checks,
+// so a blob this package accepts is exactly a blob doltlite accepts. Encode
+// writes the same bytes doltlite's serializer does.
 //
 // Layout (all integers little-endian; strings are [u32 len][bytes]):
 //
@@ -301,4 +302,93 @@ func (r *reader) i64() (int64, error) {
 		return 0, err
 	}
 	return int64(binary.LittleEndian.Uint64(b)), nil
+}
+
+// Encode serializes refs exactly as doltlite's csSerializeRefsBlob does, so
+// Encode(Decode(b)) == b for any blob doltlite wrote. An explicit default
+// branch is recorded as a trailing 0 byte on the default name and on that
+// branch's name.
+func Encode(refs *Refs) []byte {
+	def := refs.DefaultBranch
+	if def == "" {
+		def = "main"
+	}
+	w := &writer{}
+	w.p = append(w.p, Version)
+	w.padded(def, refs.DefaultExplicit)
+	w.u32(len(refs.Branches))
+	for _, b := range refs.Branches {
+		w.padded(b.Name, refs.DefaultExplicit && b.Name == def)
+		w.hash(b.Commit)
+		w.hash(b.WorkingSet)
+	}
+	w.u32(len(refs.Tags))
+	for _, t := range refs.Tags {
+		w.str(t.Name)
+		w.hash(t.Commit)
+		w.str(t.Tagger)
+		w.str(t.Email)
+		w.i64(t.Timestamp)
+		w.str(t.Message)
+	}
+	w.u32(len(refs.Remotes))
+	for _, rm := range refs.Remotes {
+		w.str(rm.Name)
+		w.str(rm.URL)
+	}
+	w.u32(len(refs.Tracking))
+	for _, t := range refs.Tracking {
+		w.str(t.Remote)
+		w.str(t.Branch)
+		w.hash(t.Commit)
+	}
+	w.u32(len(refs.Sequences))
+	for _, s := range refs.Sequences {
+		w.str(s.Table)
+		w.i64(s.Value)
+	}
+	return w.p
+}
+
+// SetRemote adds the named remote, or changes its URL if it exists. New
+// remotes go last, as dolt_remote('add', ...) appends them.
+func (r *Refs) SetRemote(name, url string) {
+	for i := range r.Remotes {
+		if r.Remotes[i].Name == name {
+			r.Remotes[i].URL = url
+			return
+		}
+	}
+	r.Remotes = append(r.Remotes, Remote{Name: name, URL: url})
+}
+
+type writer struct {
+	p []byte
+}
+
+func (w *writer) u32(n int) {
+	w.p = binary.LittleEndian.AppendUint32(w.p, uint32(n))
+}
+
+func (w *writer) str(s string) {
+	w.u32(len(s))
+	w.p = append(w.p, s...)
+}
+
+func (w *writer) padded(s string, pad bool) {
+	if !pad {
+		w.str(s)
+		return
+	}
+	w.u32(len(s) + 1)
+	w.p = append(w.p, s...)
+	w.p = append(w.p, 0)
+}
+
+func (w *writer) hash(h prollyhash.Hash) {
+	w.p = append(w.p, h[:]...)
+}
+
+func (w *writer) i64(v int64) {
+	w.p = binary.LittleEndian.AppendUint64(w.p, uint64(v))
 }
