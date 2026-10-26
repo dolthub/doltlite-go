@@ -17,6 +17,7 @@ of that protocol needed in Go.
 | `litestore` | Server-side `Store` interface (content-addressed chunk get/put/has + an opaque refs blob with compare-and-swap) plus an in-memory implementation. |
 | `remote` | Go client for the sync protocol (analog of doltlite's C `DoltliteRemote`), with optional TLS and bearer-token auth. |
 | `litehttp` | `http.Handler` implementing the protocol against a pluggable `StoreProvider`, where a host supplies auth, repo-name translation, and the storage backend. |
+| `refsblob` | Decoder and encoder for doltlite's refs blob (format v7, byte-exact with `csDecodeRefsV7` and doltlite's serializer): branches, tags, remotes, tracking branches, sequences, default branch. |
 
 ## The protocol
 
