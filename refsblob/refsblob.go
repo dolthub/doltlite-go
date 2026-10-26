@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/dolthub/doltlite-go/prollyhash"
 )
@@ -307,18 +308,18 @@ func (r *reader) i64() (int64, error) {
 // Encode serializes refs exactly as doltlite's csSerializeRefsBlob does, so
 // Encode(Decode(b)) == b for any blob doltlite wrote. An explicit default
 // branch is recorded as a trailing 0 byte on the default name and on that
-// branch's name.
+// branch's name. DefaultBranch is written as given, even when empty, since
+// doltlite keeps an empty default it decoded. Like doltlite, which measures
+// every string with strlen, Encode writes each string up to its first 0 byte.
 func Encode(refs *Refs) []byte {
-	def := refs.DefaultBranch
-	if def == "" {
-		def = "main"
-	}
+	def := cutNUL(refs.DefaultBranch)
 	w := &writer{}
 	w.p = append(w.p, Version)
 	w.padded(def, refs.DefaultExplicit)
 	w.u32(len(refs.Branches))
 	for _, b := range refs.Branches {
-		w.padded(b.Name, refs.DefaultExplicit && b.Name == def)
+		name := cutNUL(b.Name)
+		w.padded(name, refs.DefaultExplicit && name == def)
 		w.hash(b.Commit)
 		w.hash(b.WorkingSet)
 	}
@@ -370,12 +371,23 @@ func (w *writer) u32(n int) {
 	w.p = binary.LittleEndian.AppendUint32(w.p, uint32(n))
 }
 
+// cutNUL returns s up to its first 0 byte, the string doltlite's C code
+// sees.
+func cutNUL(s string) string {
+	if i := strings.IndexByte(s, 0); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 func (w *writer) str(s string) {
+	s = cutNUL(s)
 	w.u32(len(s))
 	w.p = append(w.p, s...)
 }
 
 func (w *writer) padded(s string, pad bool) {
+	s = cutNUL(s)
 	if !pad {
 		w.str(s)
 		return

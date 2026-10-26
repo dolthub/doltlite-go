@@ -210,6 +210,56 @@ func TestEncodeRoundTrip(t *testing.T) {
 	}
 }
 
+// doltlite keeps an empty default branch name it decoded, so Encode writes it
+// back rather than substituting main.
+func TestEncodeEmptyDefault(t *testing.T) {
+	blob := []byte{Version}
+	blob = appendStr(blob, "")
+	for i := 0; i < 5; i++ {
+		blob = binary.LittleEndian.AppendUint32(blob, 0)
+	}
+	refs, err := Decode(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refs.DefaultBranch != "" {
+		t.Fatalf("default = %q", refs.DefaultBranch)
+	}
+	if got := Encode(refs); !bytes.Equal(got, blob) {
+		t.Fatal("Encode(Decode(blob)) changed an empty default branch")
+	}
+}
+
+// Encode writes strings as doltlite's strlen-based serializer does: up to the
+// first 0 byte. A hand-built value with an embedded 0 encodes to what doltlite
+// would have written, and decodes to the same visible strings.
+func TestEncodeCutsAtNUL(t *testing.T) {
+	refs, err := Decode(load(t, "explicit.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Encode(refs)
+
+	withNUL := *refs
+	withNUL.DefaultBranch += "\x00suffix"
+	withNUL.Branches = append([]Branch(nil), refs.Branches...)
+	for i := range withNUL.Branches {
+		withNUL.Branches[i].Name += "\x00suffix"
+	}
+	if got := Encode(&withNUL); !bytes.Equal(got, want) {
+		t.Fatal("embedded 0 bytes reached the encoded names")
+	}
+
+	withNUL.SetRemote("origin", "https://host/repo\x00suffix")
+	again, err := Decode(Encode(&withNUL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := again.Remotes[len(again.Remotes)-1]; r.URL != "https://host/repo" {
+		t.Fatalf("remote url = %q", r.URL)
+	}
+}
+
 func TestSetRemote(t *testing.T) {
 	refs, err := Decode(load(t, "clone.bin"))
 	if err != nil {
